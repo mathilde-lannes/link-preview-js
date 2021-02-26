@@ -6,6 +6,7 @@ import { CONSTANTS } from "./constants";
 interface ILinkPreviewOptions {
   headers?: Record<string, string>;
   imagesPropertyType?: string;
+  sortImagesBySize?: `asc` | `desc`;
   proxyUrl?: string;
 }
 
@@ -16,6 +17,11 @@ interface IPrefetchedResource {
   proxyUrl?: string;
   url: string;
   data: string;
+}
+
+interface IImageAttributes {
+  src: string
+  width: number
 }
 
 const metaTag = (doc: cheerio.Root, type: string, attr: string) => {
@@ -66,9 +72,10 @@ function getMediaType(doc: cheerio.Root) {
 function getImages(
   doc: cheerio.Root,
   rootUrl: string,
-  imagesPropertyType?: string
+  imagesPropertyType?: string,
+  sortImagesBySize?: `asc` | `desc`
 ) {
-  let images: string[] = [];
+  let images: IImageAttributes[] = []
   let nodes: cheerio.Cheerio | null;
   let src: string | undefined;
   let dic: Record<string, boolean> = {};
@@ -80,11 +87,11 @@ function getImages(
 
   if (nodes) {
     nodes.each((_: number, node: cheerio.Element) => {
-      if (node.type === "tag") {
+      if (node.type === `tag`) {
         src = node.attribs.content;
         if (src) {
           src = urlObj.resolve(rootUrl, src);
-          images.push(src);
+          images.push({src, width: Number(node.attribs.width) || 5000})
         }
       }
     });
@@ -92,12 +99,12 @@ function getImages(
 
   if (images.length <= 0 && !imagesPropertyType) {
     src = doc(`link[rel=image_src]`).attr(`href`);
+    let width = doc(`link[rel=image_src]`).attr(`width`);
     if (src) {
       src = urlObj.resolve(rootUrl, src);
-      images = [src];
+      images = [{src, width: Number(width)}]
     } else {
       nodes = doc(`img`);
-
       if (nodes?.length) {
         dic = {};
         images = [];
@@ -105,16 +112,24 @@ function getImages(
           if (node.type === "tag") src = node.attribs.src;
           if (src && !dic[src]) {
             dic[src] = true;
-            // width = node.attribs.width;
-            // height = node.attribs.height;
-            images.push(urlObj.resolve(rootUrl, src));
+            // @ts-ignore
+            let width = node.attribs.width;
+            images.push({src: urlObj.resolve(rootUrl, src), width})
           }
         });
       }
     }
   }
 
-  return images;
+  if (sortImagesBySize) {
+    return images
+        .filter((img: any) => img.width !== undefined)
+        .sort((a: any, b: any) => sortImagesBySize === `desc` ? b.width - a.width : a.width - b.width)
+        .map((obj: any) => obj.src);
+  } else {
+    return images.map((obj: any) => obj.src);
+  }
+
 }
 
 function getVideos(doc: cheerio.Root) {
@@ -270,7 +285,7 @@ function parseTextResponse(
     description: getDescription(doc),
     mediaType: getMediaType(doc) || `website`,
     contentType,
-    images: getImages(doc, url, options.imagesPropertyType),
+    images: getImages(doc, url, options.imagesPropertyType, options.sortImagesBySize),
     videos: getVideos(doc),
     favicons: getFavicons(doc, url),
   };
